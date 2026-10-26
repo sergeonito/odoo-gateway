@@ -96,7 +96,10 @@ make check        # ruff + mypy --strict + pytest
 make test-live    # against the running compose stack
 ```
 
-## Design decisions
+## Architecture and design decisions
+
+[docs/architecture.md](docs/architecture.md): one request end to end, layers and dependency
+rules, where each decision is made, what the audit log holds, failure behaviour.
 
 - [ADR-0001](docs/adr/0001-gateway-in-front-of-odoo.md): a gateway instead of direct Odoo access
 - [ADR-0002](docs/adr/0002-roles-in-gateway-one-odoo-user.md): roles live in the gateway; Odoo sees one integration user
