@@ -2,7 +2,7 @@
 
 Revision ID: ${up_revision}
 Revises: ${down_revision | comma,n}
-Create Date: ${create_date}
+Create Date: ${create_date.strftime("%Y-%m-%d")}
 """
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 ${imports if imports else ""}
-
 revision: str = ${repr(up_revision)}
 down_revision: str | None = ${repr(down_revision)}
 branch_labels: str | None = ${repr(branch_labels)}

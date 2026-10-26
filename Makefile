@@ -1,6 +1,6 @@
 # Every target has a `## description`; `make` or `make help` lists them.
 .DEFAULT_GOAL := help
-.PHONY: help install check lint fmt type test test-live test-pg env up down logs token run odoo-setup odoo-apikey
+.PHONY: help install check lint fmt type test test-live test-pg env up down logs token run odoo-setup odoo-apikey migration migrate
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} \
@@ -30,6 +30,12 @@ test: ## Unit and API tests (fake Odoo, SQLite); live tests skip
 
 run: ## Gateway on :8000 with reload, against whatever .env points at
 	uv run uvicorn odoo_gateway.main:create_app --factory --reload
+
+migration: ## Generate a migration from the models: MSG="what changed" REV=0002; review it before committing
+	uv run alembic revision --autogenerate -m "$(MSG)" $(if $(REV),--rev-id $(REV))
+
+migrate: ## Apply migrations to the database alembic.ini / GATEWAY_DATABASE_URL points at
+	uv run alembic upgrade head
 
 ##@ Local stack (Docker Compose: Odoo 18 + 2x PostgreSQL + gateway)
 env: ## Create .env from .env.example with a random dev token secret (no-op if it exists)
