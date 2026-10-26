@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run pytest
+
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: gateway
+          POSTGRES_PASSWORD: gateway
+          POSTGRES_DB: gateway
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U gateway"
+          --health-interval 5s
+          --health-retries 20
+    env:
+      GATEWAY_DATABASE_URL: postgresql+asyncpg://gateway:gateway@localhost:5432/gateway
+      GATEWAY_TEST_PG_URL: postgresql+asyncpg://gateway:gateway@localhost:5432/gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - name: Migrations up, trigger test, down and up again
+        run: |
+          uv run alembic upgrade head
+          uv run pytest -m postgres -v
+          uv run alembic downgrade base
+          uv run alembic upgrade head

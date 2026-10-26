@@ -1,0 +1,17 @@
+# local config and secrets
+.env
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+dist/
+
+# editors / os
+.idea/
+.vscode/
+.DS_Store

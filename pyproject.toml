@@ -1,0 +1,65 @@
+[project]
+name = "odoo-gateway"
+version = "0.1.0"
+description = "FastAPI gateway in front of Odoo: one RBAC for internal products, Microsoft Entra ID sign-in, append-only audit log."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "httpx>=0.27",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "pyjwt[crypto]>=2.10",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "respx>=0.22",
+    "aiosqlite>=0.20",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/odoo_gateway"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC", "SIM", "PT", "RUF", "N"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]
+"migrations/**" = ["S608"]
+"scripts/**" = ["T201"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+files = ["src", "tests", "migrations", "scripts"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["respx.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+    "odoo_live: needs a running Odoo (docker compose up); set GATEWAY_ODOO_LIVE=1",
+    "postgres: needs PostgreSQL; set GATEWAY_TEST_PG_URL",
+]

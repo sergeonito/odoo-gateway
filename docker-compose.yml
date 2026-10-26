@@ -1,0 +1,79 @@
+# Local stack: Odoo 18 (+ its PostgreSQL), the gateway (+ its PostgreSQL for the audit log).
+# Credentials here are for a laptop only.
+services:
+  odoo-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD: odoo
+      POSTGRES_DB: postgres
+    volumes:
+      - odoo-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odoo"]
+      interval: 5s
+      retries: 20
+
+  # One-shot: create the `odoo` database with stock + contacts, then exit.
+  odoo-init:
+    image: odoo:18
+    depends_on:
+      odoo-db:
+        condition: service_healthy
+    environment:
+      HOST: odoo-db
+      USER: odoo
+      PASSWORD: odoo
+    command: ["odoo", "-d", "odoo", "-i", "stock,contacts", "--stop-after-init"]
+    volumes:
+      - odoo-data:/var/lib/odoo
+    restart: "no"
+
+  odoo:
+    image: odoo:18
+    depends_on:
+      odoo-init:
+        condition: service_completed_successfully
+    environment:
+      HOST: odoo-db
+      USER: odoo
+      PASSWORD: odoo
+    command: ["odoo", "-d", "odoo", "--db-filter=^odoo$$"]
+    ports:
+      - "8069:8069"
+    volumes:
+      - odoo-data:/var/lib/odoo
+
+  gateway-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: gateway
+      POSTGRES_PASSWORD: gateway
+      POSTGRES_DB: gateway
+    ports:
+      - "5433:5432"
+    volumes:
+      - gateway-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gateway"]
+      interval: 5s
+      retries: 20
+
+  gateway:
+    build: .
+    env_file: .env
+    environment:
+      GATEWAY_ODOO_URL: http://odoo:8069
+      GATEWAY_DATABASE_URL: postgresql+asyncpg://gateway:gateway@gateway-db:5432/gateway
+    depends_on:
+      gateway-db:
+        condition: service_healthy
+      odoo:
+        condition: service_started
+    ports:
+      - "8000:8000"
+
+volumes:
+  odoo-db:
+  odoo-data:
+  gateway-db:
