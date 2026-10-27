@@ -1,5 +1,11 @@
 # odoo-gateway
 
+[![CI](https://github.com/sergeonito/odoo-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/sergeonito/odoo-gateway/actions/workflows/ci.yml)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![mypy --strict](https://img.shields.io/badge/mypy-strict-blue)](pyproject.toml)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 A FastAPI service between a company's internal products and Odoo: one role model for every
 product, sign-in with Microsoft 365 accounts (Microsoft Entra ID), and an append-only audit
 log of who did what.

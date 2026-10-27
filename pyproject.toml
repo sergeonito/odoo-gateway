@@ -3,6 +3,7 @@ name = "odoo-gateway"
 version = "0.1.0"
 description = "FastAPI gateway in front of Odoo: one RBAC for internal products, Microsoft Entra ID sign-in, append-only audit log."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
