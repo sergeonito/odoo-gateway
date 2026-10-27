@@ -94,3 +94,23 @@ class AuditEventOut(BaseModel):
     resource_model: str | None
     resource_id: int | None
     details: dict[str, Any]
+
+
+class StockReportLineOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    product_id: int
+    product_name: str
+    internal_ref: str | None
+    qty_available: float
+    uom: str | None
+
+
+class StockReportOut(BaseModel):
+    """On-hand quantities as of the last snapshot run, not live Odoo data (ADR-0005)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    taken_at: datetime
+    product_count: int
+    lines: list[StockReportLineOut]

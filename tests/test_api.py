@@ -9,6 +9,7 @@ import httpx
 from odoo_gateway.audit.log import AuditLog
 from odoo_gateway.auth.rbac import Role
 from odoo_gateway.odoo.errors import OdooAccessDeniedError, OdooValidationError
+from odoo_gateway.reports.snapshot import StockReports
 from tests.conftest import FakeOdoo
 
 PRODUCTS = [
@@ -128,3 +129,44 @@ async def test_only_admin_reads_audit(client: httpx.AsyncClient, auth: Any) -> N
     assert response.status_code == 200
     # The operator's refused attempt is already in the log.
     assert response.json()[0]["action"] == "authz.audit:read"
+
+
+async def test_stock_report_is_served_from_the_snapshot_not_odoo(
+    client: httpx.AsyncClient, odoo: FakeOdoo, reports: StockReports, auth: Any
+) -> None:
+    odoo.rows["product.product"] = PRODUCTS
+    await reports.snapshot(odoo)
+    odoo.calls.clear()
+
+    response = await client.get("/reports/stock", headers=auth(Role.VIEWER))
+    assert response.status_code == 200
+    body = response.json()
+    assert body["product_count"] == 2
+    assert body["lines"][0] == {
+        "product_id": 1,
+        "product_name": "Frame 7in",
+        "internal_ref": "FR-7",
+        "qty_available": 120.0,
+        "uom": "Units",
+    }
+    assert odoo.calls == []  # the report never touches Odoo
+
+
+async def test_stock_report_is_404_before_the_first_snapshot(
+    client: httpx.AsyncClient, auth: Any
+) -> None:
+    response = await client.get("/reports/stock", headers=auth(Role.OPERATOR))
+    assert response.status_code == 404
+
+
+async def test_token_without_roles_cannot_read_reports_and_denial_is_audited(
+    client: httpx.AsyncClient, audit: AuditLog, auth: Any
+) -> None:
+    response = await client.get("/reports/stock", headers=auth(sub="nobody-1"))
+    assert response.status_code == 403
+    [event] = await audit.recent(limit=10)
+    assert (event.actor_subject, event.action, event.outcome) == (
+        "nobody-1",
+        "authz.reports:read",
+        "denied",
+    )

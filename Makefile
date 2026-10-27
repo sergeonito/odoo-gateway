@@ -1,6 +1,6 @@
 # Every target has a `## description`; `make` or `make help` lists them.
 .DEFAULT_GOAL := help
-.PHONY: help install check lint fmt type test test-live test-pg env up down logs token run odoo-setup odoo-apikey migration migrate
+.PHONY: help install check lint fmt type test test-live test-pg env up down logs token run odoo-setup odoo-apikey migration migrate snapshot
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} \
@@ -63,6 +63,9 @@ odoo-apikey: ## Print a new API key for the integration user; put it into .env
 ROLE ?= viewer
 token: ## Print a dev bearer token; ROLE=viewer|operator|admin (default viewer)
 	@uv run python -m odoo_gateway.dev_token $(ROLE)
+
+snapshot: ## Take a stock snapshot now (what the scheduled worker does); then GET /reports/stock
+	uv run python -m odoo_gateway.reports.jobs
 
 test-live: ## Smoke tests through the real app against the running stack (uses .env)
 	GATEWAY_ODOO_LIVE=1 uv run pytest -m odoo_live -v

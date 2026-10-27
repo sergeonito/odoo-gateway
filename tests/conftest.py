@@ -20,6 +20,7 @@ from odoo_gateway.db import Base
 from odoo_gateway.main import create_app
 from odoo_gateway.odoo.errors import OdooError
 from odoo_gateway.ports import Domain
+from odoo_gateway.reports.snapshot import StockReports
 
 DEV_SECRET = SecretStr("x" * 48)
 
@@ -74,6 +75,11 @@ def audit(engine: AsyncEngine) -> AuditLog:
 
 
 @pytest.fixture
+def reports(engine: AsyncEngine) -> StockReports:
+    return StockReports(async_sessionmaker(engine, expire_on_commit=False))
+
+
+@pytest.fixture
 def odoo() -> FakeOdoo:
     return FakeOdoo()
 
@@ -85,9 +91,10 @@ def verifier() -> DevTokenVerifier:
 
 @pytest.fixture
 async def client(
-    odoo: FakeOdoo, audit: AuditLog, verifier: DevTokenVerifier
+    odoo: FakeOdoo, audit: AuditLog, verifier: DevTokenVerifier, reports: StockReports
 ) -> AsyncIterator[httpx.AsyncClient]:
-    app = create_app(container=Container(odoo=odoo, audit=audit, verifier=verifier))
+    container = Container(odoo=odoo, audit=audit, verifier=verifier, reports=reports)
+    app = create_app(container=container)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://gateway") as http:
         yield http

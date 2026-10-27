@@ -11,7 +11,7 @@ import asyncio
 import itertools
 import random
 from collections.abc import Awaitable, Callable
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 import httpx
 from pydantic import SecretStr
@@ -23,6 +23,9 @@ from odoo_gateway.odoo.errors import (
     from_jsonrpc_error,
 )
 from odoo_gateway.ports import Domain
+
+if TYPE_CHECKING:
+    from odoo_gateway.config import Settings
 
 # Retried on transport errors. Writes are never retried: Odoo has no idempotency keys,
 # so a retried `create` after a lost response would create a duplicate.
@@ -61,6 +64,17 @@ class OdooClient:
         self._uid: int | None = None
         self._uid_lock = asyncio.Lock()
         self._request_ids = itertools.count(1)
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> OdooClient:
+        return cls(
+            base_url=settings.odoo_url,
+            db=settings.odoo_db,
+            login=settings.odoo_login,
+            api_key=settings.odoo_api_key,
+            timeout_s=settings.odoo_timeout_s,
+            read_retries=settings.odoo_read_retries,
+        )
 
     async def aclose(self) -> None:
         if self._owns_http:

@@ -29,19 +29,20 @@ access rules, and leave no common trail. The gateway puts three things in one pl
 | RBAC | Roles `viewer` / `operator` / `admin` → permissions; routes depend on permissions only; every 403 is audited |
 | Audit | PostgreSQL table, append-only through triggers (UPDATE, DELETE, TRUNCATE rejected); field names, not values |
 | API | `GET /products` (search by name or internal reference), `GET /products/{id}/stock`, `POST /partners`, `GET /audit`, `GET /health`; OpenAPI at `/docs` |
+| Reports | `GET /reports/stock` serves the last stock snapshot from the gateway's database, not Odoo (ADR-0005); `make snapshot` takes one |
 | Local Odoo | Compose stack with Odoo 18 (`stock`, `contacts`); `make odoo-setup` creates the integration user with two standard groups and seeds three products with stock; `make odoo-apikey` issues its API key |
 | Quality | `mypy --strict`, ruff, pytest (client, auth, API), a PostgreSQL trigger test, live smoke tests through the real app against the compose stack, GitHub Actions |
 
 ## Not yet
 
 - Entra ID tested with locally signed tokens, not yet with a real tenant.
-- No Microsoft Graph sync, background jobs, idempotency keys, rate limiting or Kubernetes
-  manifests.
+- The stock snapshot is taken by hand (`make snapshot`); the scheduled worker is next.
+- No Microsoft Graph sync, idempotency keys, rate limiting or Kubernetes manifests.
 
 ## Roadmap
 
 1. Microsoft Entra ID with a real tenant: app roles, device-code token, setup guide.
-2. Background stock snapshot (Celery + Redis) and `GET /reports/stock` from the snapshot.
+2. Scheduled stock snapshot: Celery worker + beat + Redis in the compose stack.
 3. Idempotent writes: `Idempotency-Key`, an `attempted` audit event before the Odoo call.
 4. Microsoft Graph: group membership sync, disabled users lose access.
 
@@ -62,6 +63,9 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/
      -d '{"name":"Acme","is_company":true}' http://localhost:8000/partners
 TOKEN=$(make -s token ROLE=admin)
 curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8000/audit?limit=5"
+make snapshot       # copies on-hand quantities of all storable products into the gateway's database
+TOKEN=$(make -s token ROLE=viewer)
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8000/reports/stock
 make test-live      # the same path as a test, through the real app and the real audit database
 ```
 
@@ -119,7 +123,7 @@ src/odoo_gateway/
   api/        routes, dependencies (auth, permissions), request/response models
   auth/       roles and permissions, token verification (dev, Entra ID)
   audit/      audit table and log
-  reports/    stock snapshot tables and the snapshot use case (ADR-0005)
+  reports/    stock snapshot tables, the snapshot/report use case, the snapshot job (ADR-0005)
   db.py       declarative base shared by the gateway's own tables
   odoo/       JSON-RPC client and error mapping
   ports.py    what routes need from Odoo (the client is one implementation)

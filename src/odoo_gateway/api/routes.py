@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from odoo_gateway.api.deps import ContainerDep, RequestIdDep, require
 from odoo_gateway.api.schemas import (
@@ -13,6 +13,7 @@ from odoo_gateway.api.schemas import (
     PartnerIn,
     ProductOut,
     StockLineOut,
+    StockReportOut,
 )
 from odoo_gateway.audit.models import Outcome
 from odoo_gateway.auth.rbac import Permission, Principal
@@ -22,6 +23,7 @@ from odoo_gateway.ports import Domain
 router = APIRouter()
 
 CanReadInventory = Annotated[Principal, Depends(require(Permission.INVENTORY_READ))]
+CanReadReports = Annotated[Principal, Depends(require(Permission.REPORTS_READ))]
 CanWritePartners = Annotated[Principal, Depends(require(Permission.PARTNERS_WRITE))]
 CanReadAudit = Annotated[Principal, Depends(require(Permission.AUDIT_READ))]
 
@@ -67,6 +69,15 @@ async def product_stock(
         limit=200,
     )
     return [StockLineOut.from_odoo(row) for row in rows]
+
+
+@router.get("/reports/stock", tags=["reports"])
+async def stock_report(container: ContainerDep, _: CanReadReports) -> StockReportOut:
+    """The last stock snapshot. Served from our database; Odoo is not called (ADR-0005)."""
+    snapshot = await container.reports.latest()
+    if snapshot is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No stock snapshot has been taken yet")
+    return StockReportOut.model_validate(snapshot)
 
 
 @router.post("/partners", status_code=status.HTTP_201_CREATED, tags=["partners"])

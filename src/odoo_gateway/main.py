@@ -24,6 +24,7 @@ from odoo_gateway.odoo.errors import (
     OdooUnavailableError,
     OdooValidationError,
 )
+from odoo_gateway.reports.snapshot import StockReports
 
 log = logging.getLogger("odoo_gateway")
 
@@ -55,18 +56,13 @@ def create_app(settings: Settings | None = None, *, container: Container | None 
             return
         cfg = settings or Settings()
         engine = create_async_engine(cfg.database_url, pool_pre_ping=True)
-        odoo = OdooClient(
-            base_url=cfg.odoo_url,
-            db=cfg.odoo_db,
-            login=cfg.odoo_login,
-            api_key=cfg.odoo_api_key,
-            timeout_s=cfg.odoo_timeout_s,
-            read_retries=cfg.odoo_read_retries,
-        )
+        odoo = OdooClient.from_settings(cfg)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
         app.state.container = Container(
             odoo=odoo,
-            audit=AuditLog(async_sessionmaker(engine, expire_on_commit=False)),
+            audit=AuditLog(sessions),
             verifier=build_verifier(cfg),
+            reports=StockReports(sessions),
         )
         try:
             yield

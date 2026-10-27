@@ -20,13 +20,16 @@ class Role(StrEnum):
 
 class Permission(StrEnum):
     INVENTORY_READ = "inventory:read"
+    REPORTS_READ = "reports:read"
     PARTNERS_WRITE = "partners:write"
     AUDIT_READ = "audit:read"
 
 
 ROLE_PERMISSIONS: Final[Mapping[Role, frozenset[Permission]]] = {
-    Role.VIEWER: frozenset({Permission.INVENTORY_READ}),
-    Role.OPERATOR: frozenset({Permission.INVENTORY_READ, Permission.PARTNERS_WRITE}),
+    Role.VIEWER: frozenset({Permission.INVENTORY_READ, Permission.REPORTS_READ}),
+    Role.OPERATOR: frozenset(
+        {Permission.INVENTORY_READ, Permission.REPORTS_READ, Permission.PARTNERS_WRITE}
+    ),
     Role.ADMIN: frozenset(Permission),
 }
 

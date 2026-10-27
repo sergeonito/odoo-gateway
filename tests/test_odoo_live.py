@@ -18,6 +18,7 @@ from odoo_gateway.auth.tokens import DevTokenVerifier
 from odoo_gateway.config import Settings
 from odoo_gateway.main import create_app
 from odoo_gateway.odoo.client import OdooClient
+from odoo_gateway.reports.jobs import take_stock_snapshot
 
 pytestmark = [
     pytest.mark.odoo_live,
@@ -103,3 +104,16 @@ async def test_app_reads_stock_and_creates_partner_end_to_end(
         created.json()["id"],
     )
     assert event["request_id"] == "live-smoke-0001"
+
+
+async def test_stock_report_serves_the_snapshot_just_taken(
+    settings: Settings, live: httpx.AsyncClient, token: DevTokenVerifier
+) -> None:
+    snapshot = await take_stock_snapshot(settings)
+
+    report = await live.get("/reports/stock", headers=_bearer(token, Role.VIEWER))
+    assert report.status_code == 200, report.text
+    body = report.json()
+    assert body["product_count"] == snapshot.product_count
+    [frame] = [line for line in body["lines"] if line["internal_ref"] == SEEDED_REF]
+    assert frame["qty_available"] == SEEDED_QTY

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
-
-from odoo_gateway.reports.snapshot import latest_snapshot, snapshot_stock
+from odoo_gateway.reports.snapshot import StockReports
 from tests.conftest import FakeOdoo
 
 PRODUCTS = [
@@ -27,12 +25,11 @@ PRODUCTS = [
 
 
 async def test_snapshot_copies_every_storable_product_page_by_page(
-    engine: AsyncEngine, odoo: FakeOdoo
+    reports: StockReports, odoo: FakeOdoo
 ) -> None:
     odoo.rows["product.product"] = PRODUCTS
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
 
-    snapshot = await snapshot_stock(odoo, sessions, page_size=2)
+    snapshot = await reports.snapshot(odoo, page_size=2)
 
     assert snapshot.product_count == 3
     assert [line.product_id for line in snapshot.lines] == [1, 2, 3]
@@ -43,16 +40,17 @@ async def test_snapshot_copies_every_storable_product_page_by_page(
     assert ("is_storable", "=", True) in domain
 
 
-async def test_latest_snapshot_is_the_most_recent_run(engine: AsyncEngine, odoo: FakeOdoo) -> None:
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
-    assert await latest_snapshot(sessions) is None
+async def test_latest_snapshot_is_the_most_recent_run(
+    reports: StockReports, odoo: FakeOdoo
+) -> None:
+    assert await reports.latest() is None
 
     odoo.rows["product.product"] = PRODUCTS[:1]
-    first = await snapshot_stock(odoo, sessions)
+    first = await reports.snapshot(odoo)
     odoo.rows["product.product"] = PRODUCTS
-    second = await snapshot_stock(odoo, sessions)
+    second = await reports.snapshot(odoo)
 
-    latest = await latest_snapshot(sessions)
+    latest = await reports.latest()
     assert latest is not None
     assert (latest.id, latest.product_count) == (second.id, 3)
     assert latest.id != first.id
