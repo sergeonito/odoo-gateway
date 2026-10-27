@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -104,6 +105,21 @@ async def test_app_reads_stock_and_creates_partner_end_to_end(
         created.json()["id"],
     )
     assert event["request_id"] == "live-smoke-0001"
+
+
+async def test_retry_with_idempotency_key_does_not_create_twice(
+    live: httpx.AsyncClient, token: DevTokenVerifier
+) -> None:
+    key = f"live-smoke-{datetime.now(UTC):%Y%m%d%H%M%S%f}"
+    headers = {**_bearer(token, Role.OPERATOR), "Idempotency-Key": key}
+    body = {"name": "Live idempotent partner", "is_company": True}
+
+    first = await live.post("/partners", json=body, headers=headers)
+    retry = await live.post("/partners", json=body, headers=headers)
+
+    assert first.status_code == 201, first.text
+    assert (retry.status_code, retry.json()) == (201, first.json())
+    assert retry.headers["Idempotency-Replayed"] == "true"
 
 
 async def test_stock_report_serves_the_snapshot_just_taken(

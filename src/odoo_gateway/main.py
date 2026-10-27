@@ -17,6 +17,11 @@ from odoo_gateway.audit.log import AuditLog
 from odoo_gateway.auth.tokens import DevTokenVerifier, EntraTokenVerifier, TokenVerifier
 from odoo_gateway.config import Settings
 from odoo_gateway.container import Container
+from odoo_gateway.idempotency.store import (
+    IdempotencyInProgressError,
+    IdempotencyMismatchError,
+    IdempotencyStore,
+)
 from odoo_gateway.odoo.client import OdooClient
 from odoo_gateway.odoo.errors import (
     OdooError,
@@ -63,6 +68,7 @@ def create_app(settings: Settings | None = None, *, container: Container | None 
             audit=AuditLog(sessions),
             verifier=build_verifier(cfg),
             reports=StockReports(sessions),
+            idempotency=IdempotencyStore(sessions),
         )
         try:
             yield
@@ -98,6 +104,18 @@ def create_app(settings: Settings | None = None, *, container: Container | None 
 def _install_error_handlers(app: FastAPI) -> None:
     def problem(code: int, detail: str) -> JSONResponse:
         return JSONResponse(status_code=code, content={"detail": detail})
+
+    @app.exception_handler(IdempotencyMismatchError)
+    async def idempotency_mismatch(request: Request, exc: IdempotencyMismatchError) -> JSONResponse:
+        return problem(422, "Idempotency-Key was already used for a different request")
+
+    @app.exception_handler(IdempotencyInProgressError)
+    async def idempotency_in_progress(
+        request: Request, exc: IdempotencyInProgressError
+    ) -> JSONResponse:
+        return problem(
+            status.HTTP_409_CONFLICT, "A request with this Idempotency-Key is still in progress"
+        )
 
     @app.exception_handler(OdooError)
     async def odoo_error(request: Request, exc: OdooError) -> JSONResponse:

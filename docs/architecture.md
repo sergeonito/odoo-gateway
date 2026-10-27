@@ -22,13 +22,18 @@ sequenceDiagram
         G->>A: event authz.partners:write = denied
         G-->>P: 403
     else allowed
+        G->>A: claim Idempotency-Key (replay if done, 409 if in progress)
         G->>A: event partners.create = attempted (field names, no values)
         G->>O: object.execute_kw res.partner create
         O-->>G: new id (or an Odoo exception)
         G->>A: event partners.create = allowed or failed<br/>(record id or error class)
+        G->>A: store the response on the key
         G-->>P: 201 with the new id, or 422 / 502 / 503
     end
 ```
+
+A retry with the same `Idempotency-Key` stops at step 6 and returns the stored response with
+`Idempotency-Replayed: true` ([ADR-0004](adr/0004-audit-after-the-call.md)).
 
 Reads (`GET /products`, `GET /products/{id}/stock`) follow the same path without the audit
 event on success: refusals are always audited, successful reads are not.
@@ -50,6 +55,9 @@ flowchart LR
         log[log.py<br/>record, recent]
         models[models.py<br/>audit_events]
     end
+    subgraph idem [idempotency/]
+        store["store.py<br/>claim, complete, release"]
+    end
     subgraph reports [reports/]
         snapshot["snapshot.py<br/>StockReports: snapshot, latest"]
         jobs["jobs.py<br/>take_stock_snapshot(settings)"]
@@ -60,7 +68,7 @@ flowchart LR
         client["client.py<br/>JSON-RPC, retries for reads"]
         errors["errors.py<br/>Odoo exception → OdooError"]
     end
-    container[container.py<br/>odoo, audit, verifier, reports]
+    container[container.py<br/>odoo, audit, verifier, reports, idempotency]
     main["main.py<br/>create_app, error → HTTP"]
 
     routes --> deps --> tokens
@@ -69,6 +77,7 @@ flowchart LR
     routes --> schemas
     routes --> ports
     routes --> log
+    routes --> store
     client -. implements .-> ports
     client --> errors
     main --> container
@@ -76,6 +85,7 @@ flowchart LR
     container --> log
     container --> tokens
     container --> snapshot
+    container --> store
     routes --> snapshot
     snapshot --> ports
     worker --> jobs --> snapshot
@@ -103,6 +113,7 @@ Dependency rules, enforced by imports and by tests:
 | May this route run? | `api/deps.py` | `require(permission)`; every refusal is audited before the 403. |
 | Is the input sane? | `api/schemas.py` | Lengths, patterns, `extra="forbid"`. A 422 here never reaches Odoo. |
 | How does Odoo see us? | `odoo/client.py` | One integration user with an API key and two standard groups ([ADR-0002](adr/0002-roles-in-gateway-one-odoo-user.md)). |
+| Is this a retry? | `idempotency/store.py` | Insert-first claim on (caller, key); replay, 409 or 422 decided from the stored row. |
 | What happens on failure? | `main.py` | `OdooValidationError` → 422 with Odoo's user-facing message; `OdooUnavailableError` → 503; auth/access errors of the integration user → 502 "Upstream error", details in logs only. |
 
 ## What the audit log holds
@@ -121,7 +132,8 @@ in `audit_events`:
 The table is append-only at the database level: triggers reject `UPDATE`, `DELETE` and
 `TRUNCATE` (migration 0001, tested against PostgreSQL in CI). A crash between the Odoo commit
 and the outcome event leaves an `attempted` row with no `allowed` or `failed` after it, which is
-what a reconciliation looks for ([ADR-0004](adr/0004-audit-after-the-call.md)).
+what a reconciliation looks for; the `Idempotency-Key` in its details points at the claim that
+blocks retries until then ([ADR-0004](adr/0004-audit-after-the-call.md)).
 
 ## Failure behaviour
 
@@ -140,7 +152,7 @@ flowchart LR
     dev["Developer<br/>make token, curl, make test-live"]
     dev --> gw[gateway :8000]
     gw --> odoo["odoo :8069<br/>Odoo 18, stock + contacts"]
-    gw --> gwdb[(gateway-db :5433<br/>audit_events, stock_snapshots)]
+    gw --> gwdb[(gateway-db :5433<br/>audit_events, idempotency_keys, stock_snapshots)]
     odoo --> odoodb[(odoo-db)]
     init["odoo-init<br/>one-shot: -i stock,contacts"] -.-> odoodb
     beat["beat<br/>every GATEWAY_SNAPSHOT_INTERVAL_S"] --> redis[(redis)]

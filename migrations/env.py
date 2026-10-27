@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 # Every model module must be imported so that autogenerate sees all tables.
 import odoo_gateway.audit.models
+import odoo_gateway.idempotency.models
 import odoo_gateway.reports.models  # noqa: F401
 from odoo_gateway.db import Base
 

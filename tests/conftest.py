@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import httpx
@@ -11,12 +12,14 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
-import odoo_gateway.reports.models  # noqa: F401 - registers the snapshot tables on Base
+import odoo_gateway.idempotency.models
+import odoo_gateway.reports.models  # noqa: F401
 from odoo_gateway.audit.log import AuditLog
 from odoo_gateway.auth.rbac import Role
 from odoo_gateway.auth.tokens import DevTokenVerifier
 from odoo_gateway.container import Container
 from odoo_gateway.db import Base
+from odoo_gateway.idempotency.store import IdempotencyStore
 from odoo_gateway.main import create_app
 from odoo_gateway.odoo.errors import OdooError
 from odoo_gateway.ports import Domain
@@ -60,6 +63,14 @@ class FakeOdoo:
             raise error
 
 
+class CrashingOdoo(FakeOdoo):
+    """Odoo commits the create, then the gateway process dies before it can go on."""
+
+    async def create(self, model: str, values: dict[str, Any]) -> int:
+        await super().create(model, values)
+        raise RuntimeError("process killed")
+
+
 @pytest.fixture
 async def engine() -> AsyncIterator[AsyncEngine]:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -80,6 +91,11 @@ def reports(engine: AsyncEngine) -> StockReports:
 
 
 @pytest.fixture
+def idempotency(engine: AsyncEngine) -> IdempotencyStore:
+    return IdempotencyStore(async_sessionmaker(engine, expire_on_commit=False))
+
+
+@pytest.fixture
 def odoo() -> FakeOdoo:
     return FakeOdoo()
 
@@ -90,14 +106,37 @@ def verifier() -> DevTokenVerifier:
 
 
 @pytest.fixture
-async def client(
-    odoo: FakeOdoo, audit: AuditLog, verifier: DevTokenVerifier, reports: StockReports
-) -> AsyncIterator[httpx.AsyncClient]:
-    container = Container(odoo=odoo, audit=audit, verifier=verifier, reports=reports)
+def container(
+    odoo: FakeOdoo,
+    audit: AuditLog,
+    verifier: DevTokenVerifier,
+    reports: StockReports,
+    idempotency: IdempotencyStore,
+) -> Container:
+    return Container(
+        odoo=odoo, audit=audit, verifier=verifier, reports=reports, idempotency=idempotency
+    )
+
+
+@pytest.fixture
+async def client(container: Container) -> AsyncIterator[httpx.AsyncClient]:
+    async with _client(container) as http:
+        yield http
+
+
+@asynccontextmanager
+async def _client(container: Container) -> AsyncIterator[httpx.AsyncClient]:
     app = create_app(container=container)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://gateway") as http:
         yield http
+
+
+def client_for(
+    container: Container, odoo: FakeOdoo
+) -> AbstractAsyncContextManager[httpx.AsyncClient]:
+    """The same app with another Odoo double, for tests that need a crashing one."""
+    return _client(replace(container, odoo=odoo))
 
 
 @pytest.fixture

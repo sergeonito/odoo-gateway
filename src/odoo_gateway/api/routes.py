@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
 from odoo_gateway.api.deps import ContainerDep, RequestIdDep, require
 from odoo_gateway.api.schemas import (
@@ -17,6 +17,7 @@ from odoo_gateway.api.schemas import (
 )
 from odoo_gateway.audit.models import Outcome
 from odoo_gateway.auth.rbac import Permission, Principal
+from odoo_gateway.idempotency.store import Claim, Replay
 from odoo_gateway.odoo.errors import OdooError
 from odoo_gateway.ports import Domain
 
@@ -26,6 +27,12 @@ CanReadInventory = Annotated[Principal, Depends(require(Permission.INVENTORY_REA
 CanReadReports = Annotated[Principal, Depends(require(Permission.REPORTS_READ))]
 CanWritePartners = Annotated[Principal, Depends(require(Permission.PARTNERS_WRITE))]
 CanReadAudit = Annotated[Principal, Depends(require(Permission.AUDIT_READ))]
+
+# Optional on writes. A retry with the same key gets the first result, never a second record.
+IdempotencyKeyDep = Annotated[
+    str | None,
+    Header(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$"),
+]
 
 
 @router.get("/health", tags=["ops"])
@@ -86,13 +93,29 @@ async def create_partner(
     container: ContainerDep,
     request_id: RequestIdDep,
     principal: CanWritePartners,
+    response: Response,
+    idempotency_key: IdempotencyKeyDep = None,
 ) -> CreatedOut:
+    action = "partners.create"
     values = body.to_odoo()
-    audit_fields = {"fields": sorted(values)}  # names only, never the values
+    audit_fields: dict[str, object] = {"fields": sorted(values)}  # names only, never the values
+
+    claim: Claim | None = None
+    if idempotency_key is not None:
+        claimed = await container.idempotency.claim(
+            actor_subject=principal.subject, key=idempotency_key, action=action, values=values
+        )
+        if isinstance(claimed, Replay):
+            response.headers["Idempotency-Replayed"] = "true"
+            response.status_code = claimed.status
+            return CreatedOut.model_validate(claimed.body)
+        claim = claimed
+        audit_fields["idempotency_key"] = idempotency_key
+
     # Written before the call: a crash after Odoo commits still leaves a trace (ADR-0004).
     await container.audit.record(
         principal=principal,
-        action="partners.create",
+        action=action,
         outcome=Outcome.ATTEMPTED,
         request_id=request_id,
         resource_model="res.partner",
@@ -103,23 +126,30 @@ async def create_partner(
     except OdooError as exc:
         await container.audit.record(
             principal=principal,
-            action="partners.create",
+            action=action,
             outcome=Outcome.FAILED,
             request_id=request_id,
             resource_model="res.partner",
             details={**audit_fields, "error": type(exc).__name__},
         )
+        if claim is not None:
+            await container.idempotency.release(claim)  # a known failure: the key may be retried
         raise
     await container.audit.record(
         principal=principal,
-        action="partners.create",
+        action=action,
         outcome=Outcome.ALLOWED,
         request_id=request_id,
         resource_model="res.partner",
         resource_id=partner_id,
         details=audit_fields,
     )
-    return CreatedOut(id=partner_id)
+    result = CreatedOut(id=partner_id)
+    if claim is not None:
+        await container.idempotency.complete(
+            claim, status=status.HTTP_201_CREATED, body=result.model_dump()
+        )
+    return result
 
 
 @router.get("/audit", tags=["audit"])

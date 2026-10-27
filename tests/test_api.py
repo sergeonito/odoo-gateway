@@ -10,10 +10,9 @@ import pytest
 from odoo_gateway.audit.log import AuditLog
 from odoo_gateway.auth.rbac import Role
 from odoo_gateway.container import Container
-from odoo_gateway.main import create_app
 from odoo_gateway.odoo.errors import OdooAccessDeniedError, OdooValidationError
 from odoo_gateway.reports.snapshot import StockReports
-from tests.conftest import FakeOdoo
+from tests.conftest import CrashingOdoo, FakeOdoo, client_for
 
 PRODUCTS = [
     {
@@ -120,21 +119,11 @@ async def test_odoo_validation_error_is_422_and_audited_as_failed(
 
 
 async def test_crash_after_the_odoo_call_still_leaves_an_attempted_event(
-    odoo: FakeOdoo, audit: AuditLog, verifier: Any, reports: Any, auth: Any
+    container: Container, audit: AuditLog, auth: Any
 ) -> None:
     """The gap ADR-0004 describes: Odoo commits, then the gateway dies before the outcome event."""
-
-    class CrashingOdoo(FakeOdoo):
-        async def create(self, model: str, values: dict[str, Any]) -> int:
-            await super().create(model, values)
-            raise RuntimeError("process killed")
-
     crashing = CrashingOdoo()
-    app = create_app(
-        container=Container(odoo=crashing, audit=audit, verifier=verifier, reports=reports)
-    )
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://gateway") as client:
+    async with client_for(container, crashing) as client:
         with pytest.raises(RuntimeError):
             await client.post("/partners", json={"name": "Acme"}, headers=auth(Role.OPERATOR))
 

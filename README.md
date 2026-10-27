@@ -29,20 +29,20 @@ access rules, and leave no common trail. The gateway puts three things in one pl
 | RBAC | Roles `viewer` / `operator` / `admin` → permissions; routes depend on permissions only; every 403 is audited |
 | Audit | PostgreSQL table, append-only through triggers (UPDATE, DELETE, TRUNCATE rejected); an `attempted` event before each Odoo write and the outcome after it; field names, not values |
 | API | `GET /products` (search by name or internal reference), `GET /products/{id}/stock`, `POST /partners`, `GET /audit`, `GET /health`; OpenAPI at `/docs` |
+| Writes | `Idempotency-Key` on `POST /partners`: a retry gets the stored result (`Idempotency-Replayed: true`), the same key with another body is 422, a key still running is 409 (ADR-0004) |
 | Reports | `GET /reports/stock` serves the last stock snapshot from the gateway's database, not Odoo (ADR-0005); a Celery beat + worker pair takes it every `GATEWAY_SNAPSHOT_INTERVAL_S` (Redis broker), `make snapshot` takes one by hand |
 | Local Odoo | Compose stack with Odoo 18 (`stock`, `contacts`); `make odoo-setup` creates the integration user with two standard groups and seeds three products with stock; `make odoo-apikey` issues its API key |
-| Quality | `mypy --strict`, ruff, pytest (client, auth, API, reports, worker), a PostgreSQL trigger test, live smoke tests through the real app against the compose stack, GitHub Actions |
+| Quality | `mypy --strict`, ruff, pytest (client, auth, API, idempotency, reports, worker), a PostgreSQL trigger test, live smoke tests through the real app against the compose stack, GitHub Actions |
 
 ## Not yet
 
 - Entra ID tested with locally signed tokens, not yet with a real tenant.
-- No Microsoft Graph sync, idempotency keys, rate limiting or Kubernetes manifests.
+- No Microsoft Graph sync, rate limiting or Kubernetes manifests.
 
 ## Roadmap
 
 1. Microsoft Entra ID with a real tenant: app roles, device-code token, setup guide.
-2. Idempotent writes: `Idempotency-Key`, retries answered from the stored result.
-3. Microsoft Graph: group membership sync, disabled users lose access.
+2. Microsoft Graph: group membership sync, disabled users lose access.
 
 ## Run it
 
@@ -58,7 +58,9 @@ curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8000/products?search
 curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8000/products/<id>/stock
 TOKEN=$(make -s token ROLE=operator)
 curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+     -H "Idempotency-Key: demo-0001" \
      -d '{"name":"Acme","is_company":true}' http://localhost:8000/partners
+# run the same command again: same id, header Idempotency-Replayed: true, no second contact in Odoo
 TOKEN=$(make -s token ROLE=admin)
 curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8000/audit?limit=5"
 make snapshot       # snapshot now; beat does the same every 15 min (watch: docker compose logs -f worker)
@@ -121,6 +123,7 @@ src/odoo_gateway/
   api/        routes, dependencies (auth, permissions), request/response models
   auth/       roles and permissions, token verification (dev, Entra ID)
   audit/      audit table and log
+  idempotency/ idempotency_keys table and the claim / complete / release store (ADR-0004)
   reports/    stock snapshot tables, the snapshot/report use case, the snapshot job (ADR-0005)
   worker.py   Celery app: beat schedule and the snapshot task, a thin call into reports/jobs.py
   db.py       declarative base shared by the gateway's own tables
