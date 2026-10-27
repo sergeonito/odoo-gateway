@@ -71,10 +71,13 @@ make test-live      # the same path as a test, through the real app and the real
 
 Odoo UI: http://localhost:8069 (admin / admin, local only). API docs: http://localhost:8000/docs
 
+![OpenAPI docs: health, inventory, reports, partners and audit routes](docs/images/openapi-docs.png)
+
 ### Use your own Odoo
 
 The gateway only needs the standard `product`, `stock` and `contacts` models and an integration
-user, so it can sit in front of any Odoo 17/18. In `.env`:
+user, so it can sit in front of any Odoo 18 (the snapshot filters on `is_storable`, an
+Odoo 18 field). In `.env`:
 
 ```bash
 COMPOSE_PROFILES=                                   # do not start the bundled Odoo
@@ -133,24 +136,25 @@ rules, where each decision is made, what the audit log holds, failure behaviour.
 - [ADR-0001](docs/adr/0001-gateway-in-front-of-odoo.md): a gateway instead of direct Odoo access
 - [ADR-0002](docs/adr/0002-roles-in-gateway-one-odoo-user.md): roles live in the gateway; Odoo sees one integration user
 - [ADR-0003](docs/adr/0003-json-rpc-now-json2-later.md): JSON-RPC now, JSON-2 when Odoo moves to 19+
-- [ADR-0004](docs/adr/0004-audit-after-the-call.md): audit is written after the Odoo call, and the gap that leaves
+- [ADR-0004](docs/adr/0004-audit-after-the-call.md): a write touches two systems; `attempted` events and `Idempotency-Key` close the gap
 - [ADR-0005](docs/adr/0005-stock-report-from-snapshot.md): the stock report reads a periodic snapshot, not Odoo
 
 ## Layout
 
 ```
 src/odoo_gateway/
-  api/        routes, dependencies (auth, permissions), request/response models
-  auth/       roles and permissions, token verification (dev, Entra ID)
-  audit/      audit table and log
-  idempotency/ idempotency_keys table and the claim / complete / release store (ADR-0004)
-  reports/    stock snapshot tables, the snapshot/report use case, the snapshot job (ADR-0005)
-  worker.py   Celery app: beat schedule and the snapshot task, a thin call into reports/jobs.py
-  db.py       declarative base shared by the gateway's own tables
-  odoo/       JSON-RPC client and error mapping
-  ports.py    what routes need from Odoo (the client is one implementation)
-  main.py     app factory, request ids, error mapping
-migrations/   Alembic (audit table + append-only triggers)
-scripts/      setup_odoo.py (integration user + seed), odoo_apikey.py (runs inside odoo shell)
-tests/        unit and API tests; PostgreSQL and live Odoo tests skip unless enabled
+  api/           routes, dependencies (auth, permissions), request/response models
+  auth/          roles and permissions, token verification (dev, Entra ID)
+  audit/         audit table and log
+  idempotency/   idempotency_keys table and the claim / complete / release store (ADR-0004)
+  reports/       stock snapshot tables, the snapshot/report use case, the snapshot job (ADR-0005)
+  worker.py      Celery app: beat schedule and the snapshot task, a thin call into reports/jobs.py
+  db.py          declarative base shared by the gateway's own tables
+  odoo/          JSON-RPC client and error mapping
+  ports.py       what routes need from Odoo (the client is one implementation)
+  main.py        app factory, request ids, error mapping
+migrations/      Alembic: 0001 audit table + append-only triggers, 0002 stock snapshots,
+                 0003 `attempted` outcome, 0004 idempotency keys
+scripts/         setup_odoo.py (integration user + seed), odoo_apikey.py (runs inside odoo shell)
+tests/           unit and API tests; PostgreSQL and live Odoo tests skip unless enabled
 ```
