@@ -11,11 +11,12 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
+import odoo_gateway.reports.models  # noqa: F401 - registers the snapshot tables on Base
 from odoo_gateway.audit.log import AuditLog
-from odoo_gateway.audit.models import Base
 from odoo_gateway.auth.rbac import Role
 from odoo_gateway.auth.tokens import DevTokenVerifier
 from odoo_gateway.container import Container
+from odoo_gateway.db import Base
 from odoo_gateway.main import create_app
 from odoo_gateway.odoo.errors import OdooError
 from odoo_gateway.ports import Domain

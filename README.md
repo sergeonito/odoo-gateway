@@ -110,6 +110,7 @@ rules, where each decision is made, what the audit log holds, failure behaviour.
 - [ADR-0002](docs/adr/0002-roles-in-gateway-one-odoo-user.md): roles live in the gateway; Odoo sees one integration user
 - [ADR-0003](docs/adr/0003-json-rpc-now-json2-later.md): JSON-RPC now, JSON-2 when Odoo moves to 19+
 - [ADR-0004](docs/adr/0004-audit-after-the-call.md): audit is written after the Odoo call, and the gap that leaves
+- [ADR-0005](docs/adr/0005-stock-report-from-snapshot.md): the stock report reads a periodic snapshot, not Odoo
 
 ## Layout
 
@@ -118,6 +119,8 @@ src/odoo_gateway/
   api/        routes, dependencies (auth, permissions), request/response models
   auth/       roles and permissions, token verification (dev, Entra ID)
   audit/      audit table and log
+  reports/    stock snapshot tables and the snapshot use case (ADR-0005)
+  db.py       declarative base shared by the gateway's own tables
   odoo/       JSON-RPC client and error mapping
   ports.py    what routes need from Odoo (the client is one implementation)
   main.py     app factory, request ids, error mapping

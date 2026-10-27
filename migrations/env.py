@@ -11,7 +11,10 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from odoo_gateway.audit.models import Base
+# Every model module must be imported so that autogenerate sees all tables.
+import odoo_gateway.audit.models
+import odoo_gateway.reports.models  # noqa: F401
+from odoo_gateway.db import Base
 
 config = context.config
 if config.config_file_name is not None:
