@@ -40,13 +40,13 @@ migration: ## Generate a migration from the models: MSG="what changed" REV=0002;
 migrate: ## Apply migrations to the database alembic.ini / GATEWAY_DATABASE_URL points at
 	uv run alembic upgrade head
 
-##@ Local stack (Docker Compose: Odoo 18 + 2x PostgreSQL + gateway + Redis + Celery worker/beat)
+##@ Local stack (Docker Compose: gateway + PostgreSQL + Redis + Celery worker/beat, plus a bundled Odoo 18 by default)
 env: ## Create .env from .env.example with a random dev token secret (no-op if it exists)
 	@test -f .env && echo ".env already exists" || \
 	  sed "s|^GATEWAY_DEV_JWT_SECRET=.*|GATEWAY_DEV_JWT_SECRET=$$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')|" \
 	  .env.example > .env && echo "wrote .env"
 
-up: ## Build and start the stack; the first start installs Odoo modules (~2 min)
+up: ## Build and start the stack; with the bundled Odoo the first start installs its modules (~2 min)
 	docker compose up -d --build
 
 down: ## Stop the stack (volumes with Odoo and audit data are kept)
@@ -55,7 +55,7 @@ down: ## Stop the stack (volumes with Odoo and audit data are kept)
 logs: ## Follow gateway, worker, beat and Odoo logs
 	docker compose logs -f gateway worker beat odoo
 
-odoo-setup: ## Create the integration user and seed products in Odoo (as admin, once per stack)
+odoo-setup: ## Create the integration user and seed three demo products in the bundled Odoo (as admin, once)
 	uv run python scripts/setup_odoo.py
 
 odoo-apikey: ## Print a new API key for the integration user; put it into .env

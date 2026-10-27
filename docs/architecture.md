@@ -161,7 +161,8 @@ flowchart LR
     worker --> gwdb
 ```
 
-The worker and beat run from the gateway image. Beat only enqueues; the worker reads Odoo with
+The three Odoo services form the compose profile `odoo`; without it the gateway and worker talk
+to whatever `GATEWAY_ODOO_URL_IN_DOCKER` points at. The worker and beat run from the gateway image. Beat only enqueues; the worker reads Odoo with
 the same integration user and writes the snapshot the API serves from `GET /reports/stock`.
 
 `make odoo-setup` creates the integration user and seed products through the gateway's own

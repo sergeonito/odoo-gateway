@@ -1,9 +1,13 @@
-# Local stack: Odoo 18 (+ its PostgreSQL), the gateway (+ its PostgreSQL for audit and snapshots),
-# Redis with a Celery worker and beat for the scheduled stock snapshot.
-# Credentials here are for a laptop only.
+# Local stack: the gateway (+ its PostgreSQL for audit and snapshots), Redis with a Celery worker
+# and beat for the scheduled stock snapshot, and a bundled Odoo 18 (+ its PostgreSQL).
+#
+# The bundled Odoo is the `odoo` profile (on by default through COMPOSE_PROFILES in .env).
+# To point the gateway at another Odoo instead, drop the profile and set
+# GATEWAY_ODOO_URL_IN_DOCKER in .env (README, "Use your own Odoo"). Credentials here are for a laptop only.
 services:
   odoo-db:
     image: postgres:16
+    profiles: [odoo]
     environment:
       POSTGRES_USER: odoo
       POSTGRES_PASSWORD: odoo
@@ -18,6 +22,7 @@ services:
   # One-shot: create the `odoo` database with stock + contacts, then exit.
   odoo-init:
     image: odoo:18
+    profiles: [odoo]
     depends_on:
       odoo-db:
         condition: service_healthy
@@ -32,6 +37,7 @@ services:
 
   odoo:
     image: odoo:18
+    profiles: [odoo]
     depends_on:
       odoo-init:
         condition: service_completed_successfully
@@ -60,17 +66,16 @@ services:
       interval: 5s
       retries: 20
 
+  # Odoo is reached lazily on the first request, so nothing here waits for it.
   gateway:
     build: .
     env_file: .env
     environment:
-      GATEWAY_ODOO_URL: http://odoo:8069
+      GATEWAY_ODOO_URL: ${GATEWAY_ODOO_URL_IN_DOCKER:-http://odoo:8069}
       GATEWAY_DATABASE_URL: postgresql+asyncpg://gateway:gateway@gateway-db:5432/gateway
     depends_on:
       gateway-db:
         condition: service_healthy
-      odoo:
-        condition: service_started
     ports:
       - "8000:8000"
 
@@ -88,7 +93,7 @@ services:
     build: .
     env_file: .env
     environment:
-      GATEWAY_ODOO_URL: http://odoo:8069
+      GATEWAY_ODOO_URL: ${GATEWAY_ODOO_URL_IN_DOCKER:-http://odoo:8069}
       GATEWAY_DATABASE_URL: postgresql+asyncpg://gateway:gateway@gateway-db:5432/gateway
       GATEWAY_REDIS_URL: redis://redis:6379/0
     command: ["python", "-m", "odoo_gateway.worker", "worker", "--loglevel=info", "--concurrency=1"]

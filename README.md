@@ -48,7 +48,7 @@ access rules, and leave no common trail. The gateway puts three things in one pl
 
 ```bash
 make env            # .env with a random dev token secret
-make up             # Odoo 18, 2x PostgreSQL, gateway, Redis, Celery worker + beat (first start ~2 min)
+make up             # gateway, PostgreSQL, Redis, Celery worker + beat, bundled Odoo 18 (first start ~2 min)
 make odoo-setup     # integration user `gateway` + three seed products with stock (as admin, once)
 make odoo-apikey    # prints an API key for `gateway`: put it into .env with GATEWAY_ODOO_LOGIN=gateway
 make up             # restart the gateway with the integration user
@@ -70,6 +70,26 @@ make test-live      # the same path as a test, through the real app and the real
 ```
 
 Odoo UI: http://localhost:8069 (admin / admin, local only). API docs: http://localhost:8000/docs
+
+### Use your own Odoo
+
+The gateway only needs the standard `product`, `stock` and `contacts` models and an integration
+user, so it can sit in front of any Odoo 17/18. In `.env`:
+
+```bash
+COMPOSE_PROFILES=                                   # do not start the bundled Odoo
+GATEWAY_ODOO_URL=https://odoo.example.com           # as seen from your machine (make token, make test-live)
+GATEWAY_ODOO_URL_IN_DOCKER=https://odoo.example.com # as seen from the gateway container
+GATEWAY_ODOO_DB=production
+GATEWAY_ODOO_LOGIN=gateway
+GATEWAY_ODOO_API_KEY=...                            # Settings → Users → gateway → API Keys
+```
+
+Create the integration user in that Odoo with the groups *Inventory / User*
+(`stock.group_stock_user`) and *Contact Creation* (`base.group_partner_manager`), no password,
+and issue it an API key. `make odoo-setup` is written for the bundled instance: it also seeds
+demo products, so do not run it against a real database. For an Odoo running on the host
+machine use `http://host.docker.internal:8069` as the in-Docker URL.
 
 ## Findings from the live run
 
