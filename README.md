@@ -73,6 +73,10 @@ Odoo UI: http://localhost:8069 (admin / admin, local only). API docs: http://loc
 
 ![OpenAPI docs: health, inventory, reports, partners and audit routes](docs/images/openapi-docs.png)
 
+A recorded walk through the same commands, 80 seconds: reads, a refused write and its audit
+event, `Idempotency-Key` replay, the audit pair, Odoo down:
+[asciinema.org/a/KgrmdI53dmsI5c9X](https://asciinema.org/a/KgrmdI53dmsI5c9X).
+
 ### Use your own Odoo
 
 The gateway only needs the standard `product`, `stock` and `contacts` models and an integration
