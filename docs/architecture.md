@@ -49,12 +49,17 @@ flowchart LR
         log[log.py<br/>record, recent]
         models[models.py<br/>audit_events]
     end
+    subgraph reports [reports/]
+        snapshot["snapshot.py<br/>StockReports: snapshot, latest"]
+        jobs["jobs.py<br/>take_stock_snapshot(settings)"]
+    end
+    worker["worker.py<br/>Celery beat + task"]
     ports[ports.py<br/>OdooPort protocol]
     subgraph odoo [odoo/]
         client["client.py<br/>JSON-RPC, retries for reads"]
         errors["errors.py<br/>Odoo exception → OdooError"]
     end
-    container[container.py<br/>odoo, audit, verifier]
+    container[container.py<br/>odoo, audit, verifier, reports]
     main["main.py<br/>create_app, error → HTTP"]
 
     routes --> deps --> tokens
@@ -69,6 +74,11 @@ flowchart LR
     container --> ports
     container --> log
     container --> tokens
+    container --> snapshot
+    routes --> snapshot
+    snapshot --> ports
+    worker --> jobs --> snapshot
+    jobs --> client
 ```
 
 Dependency rules, enforced by imports and by tests:
@@ -128,10 +138,17 @@ flowchart LR
     dev["Developer<br/>make token, curl, make test-live"]
     dev --> gw[gateway :8000]
     gw --> odoo["odoo :8069<br/>Odoo 18, stock + contacts"]
-    gw --> gwdb[(gateway-db :5433<br/>audit_events)]
+    gw --> gwdb[(gateway-db :5433<br/>audit_events, stock_snapshots)]
     odoo --> odoodb[(odoo-db)]
     init["odoo-init<br/>one-shot: -i stock,contacts"] -.-> odoodb
+    beat["beat<br/>every GATEWAY_SNAPSHOT_INTERVAL_S"] --> redis[(redis)]
+    redis --> worker["worker<br/>reports.stock_snapshot"]
+    worker --> odoo
+    worker --> gwdb
 ```
+
+The worker and beat run from the gateway image. Beat only enqueues; the worker reads Odoo with
+the same integration user and writes the snapshot the API serves from `GET /reports/stock`.
 
 `make odoo-setup` creates the integration user and seed products through the gateway's own
 client; `make odoo-apikey` issues its API key inside `odoo shell`, the one step Odoo does not

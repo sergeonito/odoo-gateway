@@ -1,4 +1,5 @@
-# Local stack: Odoo 18 (+ its PostgreSQL), the gateway (+ its PostgreSQL for the audit log).
+# Local stack: Odoo 18 (+ its PostgreSQL), the gateway (+ its PostgreSQL for audit and snapshots),
+# Redis with a Celery worker and beat for the scheduled stock snapshot.
 # Credentials here are for a laptop only.
 services:
   odoo-db:
@@ -72,6 +73,40 @@ services:
         condition: service_started
     ports:
       - "8000:8000"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"  # for `make worker` on the host
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+
+  # Same image as the gateway; the worker runs tasks, beat only enqueues them on schedule.
+  worker:
+    build: .
+    env_file: .env
+    environment:
+      GATEWAY_ODOO_URL: http://odoo:8069
+      GATEWAY_DATABASE_URL: postgresql+asyncpg://gateway:gateway@gateway-db:5432/gateway
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+    command: ["python", "-m", "odoo_gateway.worker", "worker", "--loglevel=info", "--concurrency=1"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      gateway:
+        condition: service_started  # the gateway runs the migrations
+
+  beat:
+    build: .
+    env_file: .env
+    environment:
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+    command: ["python", "-m", "odoo_gateway.worker", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
+    depends_on:
+      redis:
+        condition: service_healthy
 
 volumes:
   odoo-db:

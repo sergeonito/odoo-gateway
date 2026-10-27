@@ -25,8 +25,12 @@ class Settings(BaseSettings):
     odoo_timeout_s: float = Field(default=10.0, gt=0, le=120)
     odoo_read_retries: int = Field(default=2, ge=0, le=5)
 
-    # Gateway's own database: audit log only (for now).
+    # Gateway's own database: audit log and stock snapshots.
     database_url: str = "postgresql+asyncpg://gateway:gateway@localhost:5433/gateway"
+
+    # Background jobs: Celery broker and how often the stock snapshot is taken.
+    redis_url: str = "redis://localhost:6379/0"
+    snapshot_interval_s: int = Field(default=900, ge=30, le=86_400)
 
     # Authentication: "dev" = HS256 tokens signed here; "entra" = Microsoft Entra ID.
     auth_mode: Literal["dev", "entra"] = "dev"

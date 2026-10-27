@@ -1,6 +1,6 @@
 # Every target has a `## description`; `make` or `make help` lists them.
 .DEFAULT_GOAL := help
-.PHONY: help install check lint fmt type test test-live test-pg env up down logs token run odoo-setup odoo-apikey migration migrate snapshot
+.PHONY: help install check lint fmt type test test-live test-pg env up down logs token run odoo-setup odoo-apikey migration migrate snapshot worker
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} \
@@ -31,13 +31,16 @@ test: ## Unit and API tests (fake Odoo, SQLite); live tests skip
 run: ## Gateway on :8000 with reload, against whatever .env points at
 	uv run uvicorn odoo_gateway.main:create_app --factory --reload
 
+worker: ## Celery worker with embedded beat, against whatever .env points at (needs Redis from make up)
+	uv run python -m odoo_gateway.worker worker --beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+
 migration: ## Generate a migration from the models: MSG="what changed" REV=0002; review it before committing
 	uv run alembic revision --autogenerate -m "$(MSG)" $(if $(REV),--rev-id $(REV))
 
 migrate: ## Apply migrations to the database alembic.ini / GATEWAY_DATABASE_URL points at
 	uv run alembic upgrade head
 
-##@ Local stack (Docker Compose: Odoo 18 + 2x PostgreSQL + gateway)
+##@ Local stack (Docker Compose: Odoo 18 + 2x PostgreSQL + gateway + Redis + Celery worker/beat)
 env: ## Create .env from .env.example with a random dev token secret (no-op if it exists)
 	@test -f .env && echo ".env already exists" || \
 	  sed "s|^GATEWAY_DEV_JWT_SECRET=.*|GATEWAY_DEV_JWT_SECRET=$$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')|" \
@@ -49,8 +52,8 @@ up: ## Build and start the stack; the first start installs Odoo modules (~2 min)
 down: ## Stop the stack (volumes with Odoo and audit data are kept)
 	docker compose down
 
-logs: ## Follow gateway and Odoo logs
-	docker compose logs -f gateway odoo
+logs: ## Follow gateway, worker, beat and Odoo logs
+	docker compose logs -f gateway worker beat odoo
 
 odoo-setup: ## Create the integration user and seed products in Odoo (as admin, once per stack)
 	uv run python scripts/setup_odoo.py
