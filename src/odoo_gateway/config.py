@@ -29,7 +29,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://gateway:gateway@localhost:5433/gateway"
 
     # Background jobs: Celery broker and how often the stock snapshot is taken.
-    redis_url: str = "redis://localhost:6379/0"
+    # 6380 is where the compose stack publishes its Redis (6379 is often taken on a laptop).
+    redis_url: str = "redis://localhost:6380/0"
     snapshot_interval_s: int = Field(default=900, ge=30, le=86_400)
 
     # Authentication: "dev" = HS256 tokens signed here; "entra" = Microsoft Entra ID.

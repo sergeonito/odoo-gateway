@@ -47,7 +47,7 @@ services:
       PASSWORD: odoo
     command: ["odoo", "-d", "odoo", "--db-filter=^odoo$$"]
     ports:
-      - "8069:8069"
+      - "127.0.0.1:8069:8069"
     volumes:
       - odoo-data:/var/lib/odoo
 
@@ -58,7 +58,7 @@ services:
       POSTGRES_PASSWORD: gateway
       POSTGRES_DB: gateway
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - gateway-db:/var/lib/postgresql/data
     healthcheck:
@@ -77,12 +77,12 @@ services:
       gateway-db:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
 
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"  # for `make worker` on the host
+      - "127.0.0.1:6380:6379"  # for `make worker` on the host; 6380 so a Redis already on the laptop is left alone
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
