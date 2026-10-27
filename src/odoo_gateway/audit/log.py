@@ -44,6 +44,23 @@ class AuditLog:
         async with self._sessions.begin() as session:
             session.add(event)
 
+    async def attempt_for_key(
+        self, *, actor_subject: str, idempotency_key: str
+    ) -> AuditEvent | None:
+        """The `attempted` event of a claimed key: its request id leads to the application logs."""
+        query = (
+            select(AuditEvent)
+            .where(
+                AuditEvent.actor_subject == actor_subject,
+                AuditEvent.outcome == Outcome.ATTEMPTED.value,
+                AuditEvent.details["idempotency_key"].as_string() == idempotency_key,
+            )
+            .order_by(AuditEvent.id.desc())
+            .limit(1)
+        )
+        async with self._sessions() as session:
+            return await session.scalar(query)
+
     async def recent(
         self,
         *,

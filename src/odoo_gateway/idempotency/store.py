@@ -11,10 +11,10 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -39,6 +39,21 @@ class Claim:
 class Replay:
     status: int
     body: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class StuckClaim:
+    """A claim still in progress long after it was made: the request died mid-flight."""
+
+    actor_subject: str
+    key: str
+    action: str
+    created_at: datetime
+
+
+def _aware(moment: datetime) -> datetime:
+    """SQLite hands back naive datetimes; everything stored here is UTC."""
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
 
 
 def fingerprint(action: str, values: Mapping[str, Any]) -> str:
@@ -99,6 +114,33 @@ class IdempotencyStore:
         )
         async with self._sessions.begin() as session:
             await session.execute(statement)
+
+    async def stuck(self, *, older_than: timedelta) -> list[StuckClaim]:
+        """Claims in progress since before `now - older_than`, oldest first."""
+        cutoff = datetime.now(UTC) - older_than
+        query = (
+            select(IdempotencyKey)
+            .where(IdempotencyKey.state == IN_PROGRESS, IdempotencyKey.created_at < cutoff)
+            .order_by(IdempotencyKey.created_at)
+        )
+        async with self._sessions() as session:
+            rows = (await session.scalars(query)).all()
+        return [
+            StuckClaim(
+                actor_subject=row.actor_subject,
+                key=row.key,
+                action=row.action,
+                created_at=_aware(row.created_at),
+            )
+            for row in rows
+        ]
+
+    async def in_progress(self, *, actor_subject: str, key: str) -> Claim | None:
+        async with self._sessions() as session:
+            row = await session.get(IdempotencyKey, {"actor_subject": actor_subject, "key": key})
+        if row is None or row.state != IN_PROGRESS:
+            return None
+        return Claim(actor_subject, key)
 
     async def release(self, claim: Claim) -> None:
         """The Odoo call failed with a known error: let the caller retry with the same key."""

@@ -28,8 +28,8 @@ access rules, and leave no common trail. The gateway puts three things in one pl
 | Auth | Entra ID access tokens (RS256, tenant signing keys, `oid` as subject, app roles mapped by config); HS256 dev tokens, refused when `environment=production` |
 | RBAC | Roles `viewer` / `operator` / `admin` → permissions; routes depend on permissions only; every 403 is audited |
 | Audit | PostgreSQL table, append-only through triggers (UPDATE, DELETE, TRUNCATE rejected); an `attempted` event before each Odoo write and the outcome after it; field names, not values |
-| API | `GET /products` (search by name or internal reference), `GET /products/{id}/stock`, `POST /partners`, `GET /audit`, `GET /health`; OpenAPI at `/docs` |
-| Writes | `Idempotency-Key` on `POST /partners`: a retry gets the stored result (`Idempotency-Replayed: true`), the same key with another body is 422, a key still running is 409 (ADR-0004) |
+| API | `GET /products` (search by name or internal reference), `GET /products/{id}/stock`, `POST /partners`, `GET /audit`, `GET`/`POST /reconciliation/idempotency`, `GET /health`; OpenAPI at `/docs` |
+| Writes | `Idempotency-Key` on `POST /partners`: a retry gets the stored result (`Idempotency-Replayed: true`), the same key with another body is 422, a key still running is 409; keys left behind by a crash are listed and resolved through `/reconciliation/idempotency` (admins, audited) (ADR-0004) |
 | Reports | `GET /reports/stock` serves the last stock snapshot from the gateway's database, not Odoo (ADR-0005); a Celery beat + worker pair takes it every `GATEWAY_SNAPSHOT_INTERVAL_S` (Redis broker), `make snapshot` takes one by hand |
 | Local Odoo | Compose stack with Odoo 18 (`stock`, `contacts`); `make odoo-setup` creates the integration user with two standard groups and seeds three products with stock; `make odoo-apikey` issues its API key |
 | Quality | `mypy --strict`, ruff, pytest (client, auth, API, idempotency, reports, worker), a PostgreSQL trigger test, live smoke tests through the real app against the compose stack, GitHub Actions |

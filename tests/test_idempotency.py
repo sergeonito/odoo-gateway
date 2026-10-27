@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
 import pytest
+from sqlalchemy import update
 
 from odoo_gateway.audit.log import AuditLog
 from odoo_gateway.auth.rbac import Role
 from odoo_gateway.container import Container
+from odoo_gateway.idempotency.models import IdempotencyKey
 from odoo_gateway.idempotency.store import (
     Claim,
     IdempotencyInProgressError,
@@ -135,3 +138,131 @@ async def test_store_release_only_drops_claims_in_progress(idempotency: Idempote
     assert isinstance(fresh, Claim)
     with pytest.raises(IdempotencyInProgressError):
         await idempotency.claim(actor_subject="a", key="another-key-1", action="x", values={})
+
+
+async def _age(idempotency: IdempotencyStore, key: str, seconds: int) -> None:
+    """Backdate a claim: the request that made it died `seconds` ago."""
+    sessions = idempotency._sessions
+    async with sessions.begin() as session:
+        await session.execute(
+            update(IdempotencyKey)
+            .where(IdempotencyKey.key == key)
+            .values(created_at=datetime.now(UTC) - timedelta(seconds=seconds))
+        )
+
+
+async def test_stuck_lists_only_old_claims_in_progress(idempotency: IdempotencyStore) -> None:
+    old = await idempotency.claim(actor_subject="a", key="old-key-0001", action="x", values={})
+    done = await idempotency.claim(actor_subject="a", key="done-key-001", action="x", values={})
+    await idempotency.claim(actor_subject="a", key="new-key-0001", action="x", values={})
+    assert isinstance(old, Claim)
+    assert isinstance(done, Claim)
+    await idempotency.complete(done, status=201, body={"id": 1})
+    await _age(idempotency, "old-key-0001", 600)
+    await _age(idempotency, "done-key-001", 600)
+
+    stuck = await idempotency.stuck(older_than=timedelta(seconds=300))
+
+    assert [(c.key, c.action) for c in stuck] == [("old-key-0001", "x")]
+
+
+async def test_admin_sees_stuck_keys_with_the_request_id_of_the_attempt(
+    container: Container, idempotency: IdempotencyStore, odoo: FakeOdoo, auth: Any
+) -> None:
+    async with client_for(container, CrashingOdoo()) as crashing_client:
+        with pytest.raises(RuntimeError):
+            await crashing_client.post(
+                "/partners",
+                json=BODY,
+                headers={**_headers(auth), "X-Request-ID": "req-crashed-01"},
+            )
+    await _age(idempotency, KEY, 600)
+
+    async with client_for(container, odoo) as client:
+        fresh = await client.get("/reconciliation/idempotency", headers=auth(Role.ADMIN))
+        listed = await client.get(
+            "/reconciliation/idempotency", params={"older_than_s": 60}, headers=auth(Role.ADMIN)
+        )
+    assert fresh.status_code == 200
+    assert listed.status_code == 200
+    [row] = listed.json()
+    assert (row["actor_subject"], row["key"], row["action"]) == ("op-1", KEY, "partners.create")
+    assert row["request_id"] == "req-crashed-01"
+    assert row["age_s"] >= 600
+
+
+@pytest.mark.parametrize(
+    ("resolution", "resource_id", "retry_status", "retry_replayed"),
+    [("release", None, 201, False), ("complete", 77, 201, True)],
+)
+async def test_reconcile_release_or_complete_then_the_retry_behaves(
+    client: httpx.AsyncClient,
+    idempotency: IdempotencyStore,
+    odoo: FakeOdoo,
+    audit: AuditLog,
+    auth: Any,
+    resolution: str,
+    resource_id: int | None,
+    retry_status: int,
+    retry_replayed: bool,
+) -> None:
+    claimed = await idempotency.claim(
+        actor_subject="op-1", key=KEY, action="partners.create", values=BODY
+    )
+    assert isinstance(claimed, Claim)
+    body = {
+        "actor_subject": "op-1",
+        "key": KEY,
+        "resolution": resolution,
+        "resource_id": resource_id,
+    }
+
+    resolved = await client.post("/reconciliation/idempotency", json=body, headers=auth(Role.ADMIN))
+    assert resolved.status_code == 200, resolved.text
+
+    retry = await client.post("/partners", json=BODY, headers=_headers(auth))
+    assert retry.status_code == retry_status
+    assert ("Idempotency-Replayed" in retry.headers) is retry_replayed
+    if retry_replayed:
+        assert retry.json() == {"id": resource_id}
+        assert odoo.calls == []  # Odoo already has the record
+    else:
+        assert len(odoo.calls) == 1  # a real second attempt
+    event = next(e for e in await audit.recent(limit=10) if e.action == "idempotency.reconcile")
+    assert (event.outcome, event.resource_id, event.details["resolution"]) == (
+        "allowed",
+        resource_id,
+        resolution,
+    )
+
+
+async def test_reconcile_validates_body_and_needs_a_claim_in_progress(
+    client: httpx.AsyncClient, auth: Any
+) -> None:
+    headers = auth(Role.ADMIN)
+    bad = [
+        {"actor_subject": "op-1", "key": KEY, "resolution": "complete"},  # no id
+        {"actor_subject": "op-1", "key": KEY, "resolution": "release", "resource_id": 5},
+        {"actor_subject": "op-1", "key": "short", "resolution": "release"},
+    ]
+    for body in bad:
+        assert (
+            await client.post("/reconciliation/idempotency", json=body, headers=headers)
+        ).status_code == 422, body
+    missing = {"actor_subject": "op-1", "key": KEY, "resolution": "release"}
+    assert (
+        await client.post("/reconciliation/idempotency", json=missing, headers=headers)
+    ).status_code == 404
+
+
+async def test_only_admin_reconciles(client: httpx.AsyncClient, audit: AuditLog, auth: Any) -> None:
+    response = await client.get(
+        "/reconciliation/idempotency", headers=auth(Role.OPERATOR, sub="op-9")
+    )
+    assert response.status_code == 403
+    [event] = await audit.recent(limit=10)
+    assert (event.actor_subject, event.action, event.outcome) == (
+        "op-9",
+        "authz.idempotency:reconcile",
+        "denied",
+    )

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 def _text(value: Any) -> str | None:
@@ -114,3 +114,37 @@ class StockReportOut(BaseModel):
     taken_at: datetime
     product_count: int
     lines: list[StockReportLineOut]
+
+
+class StuckClaimOut(BaseModel):
+    """An idempotency key claimed before a request died. Check Odoo, then resolve it."""
+
+    actor_subject: str
+    key: str
+    action: str
+    created_at: datetime
+    age_s: int
+    request_id: str | None  # of the `attempted` audit event, for the application logs
+
+
+class ReconcileIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    actor_subject: str = Field(min_length=1, max_length=128)
+    key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
+    # release: Odoo has no record, the client may retry. complete: the record exists with this id,
+    # a retry will get it back as a replay.
+    resolution: Literal["release", "complete"]
+    resource_id: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _complete_needs_an_id(self) -> ReconcileIn:
+        if (self.resolution == "complete") != (self.resource_id is not None):
+            raise ValueError("resource_id is required for 'complete' and not allowed for 'release'")
+        return self
+
+
+class ReconcileOut(BaseModel):
+    actor_subject: str
+    key: str
+    resolution: Literal["release", "complete"]

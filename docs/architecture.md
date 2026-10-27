@@ -114,6 +114,7 @@ Dependency rules, enforced by imports and by tests:
 | Is the input sane? | `api/schemas.py` | Lengths, patterns, `extra="forbid"`. A 422 here never reaches Odoo. |
 | How does Odoo see us? | `odoo/client.py` | One integration user with an API key and two standard groups ([ADR-0002](adr/0002-roles-in-gateway-one-odoo-user.md)). |
 | Is this a retry? | `idempotency/store.py` | Insert-first claim on (caller, key); replay, 409 or 422 decided from the stored row. |
+| Did that write happen? | `GET /reconciliation/idempotency` | Claims older than a threshold with the `attempted` event's request id; an admin checks Odoo and posts `release` or `complete`, audited. |
 | What happens on failure? | `main.py` | `OdooValidationError` → 422 with Odoo's user-facing message; `OdooUnavailableError` → 503; auth/access errors of the integration user → 502 "Upstream error", details in logs only. |
 
 ## What the audit log holds
@@ -132,8 +133,8 @@ in `audit_events`:
 The table is append-only at the database level: triggers reject `UPDATE`, `DELETE` and
 `TRUNCATE` (migration 0001, tested against PostgreSQL in CI). A crash between the Odoo commit
 and the outcome event leaves an `attempted` row with no `allowed` or `failed` after it, which is
-what a reconciliation looks for; the `Idempotency-Key` in its details points at the claim that
-blocks retries until then ([ADR-0004](adr/0004-audit-after-the-call.md)).
+what `GET /reconciliation/idempotency` surfaces; the `Idempotency-Key` in its details points at
+the claim that blocks retries until an admin resolves it ([ADR-0004](adr/0004-audit-after-the-call.md)).
 
 ## Failure behaviour
 

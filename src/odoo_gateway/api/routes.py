@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
@@ -12,8 +13,11 @@ from odoo_gateway.api.schemas import (
     CreatedOut,
     PartnerIn,
     ProductOut,
+    ReconcileIn,
+    ReconcileOut,
     StockLineOut,
     StockReportOut,
+    StuckClaimOut,
 )
 from odoo_gateway.audit.models import Outcome
 from odoo_gateway.auth.rbac import Permission, Principal
@@ -27,6 +31,7 @@ CanReadInventory = Annotated[Principal, Depends(require(Permission.INVENTORY_REA
 CanReadReports = Annotated[Principal, Depends(require(Permission.REPORTS_READ))]
 CanWritePartners = Annotated[Principal, Depends(require(Permission.PARTNERS_WRITE))]
 CanReadAudit = Annotated[Principal, Depends(require(Permission.AUDIT_READ))]
+CanReconcile = Annotated[Principal, Depends(require(Permission.IDEMPOTENCY_RECONCILE))]
 
 # Optional on writes. A retry with the same key gets the first result, never a second record.
 IdempotencyKeyDep = Annotated[
@@ -162,3 +167,62 @@ async def list_audit(
 ) -> list[AuditEventOut]:
     events = await container.audit.recent(limit=limit, actor=actor, action=action)
     return [AuditEventOut.model_validate(event) for event in events]
+
+
+@router.get("/reconciliation/idempotency", tags=["reconciliation"])
+async def stuck_idempotency_keys(
+    container: ContainerDep,
+    _: CanReconcile,
+    older_than_s: Annotated[int, Query(ge=10, le=86_400)] = 300,
+) -> list[StuckClaimOut]:
+    """Keys claimed before a request died: the Odoo call may or may not have happened."""
+    now = datetime.now(UTC)
+    out: list[StuckClaimOut] = []
+    for claim in await container.idempotency.stuck(older_than=timedelta(seconds=older_than_s)):
+        attempt = await container.audit.attempt_for_key(
+            actor_subject=claim.actor_subject, idempotency_key=claim.key
+        )
+        out.append(
+            StuckClaimOut(
+                actor_subject=claim.actor_subject,
+                key=claim.key,
+                action=claim.action,
+                created_at=claim.created_at,
+                age_s=int((now - claim.created_at).total_seconds()),
+                request_id=attempt.request_id if attempt else None,
+            )
+        )
+    return out
+
+
+@router.post("/reconciliation/idempotency", tags=["reconciliation"])
+async def reconcile_idempotency_key(
+    body: ReconcileIn,
+    container: ContainerDep,
+    request_id: RequestIdDep,
+    principal: CanReconcile,
+) -> ReconcileOut:
+    """Resolve a stuck key after checking Odoo by hand. Audited like any other write."""
+    claim = await container.idempotency.in_progress(actor_subject=body.actor_subject, key=body.key)
+    if claim is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No idempotency key in progress")
+    if body.resolution == "release":
+        await container.idempotency.release(claim)
+    else:
+        await container.idempotency.complete(
+            claim, status=status.HTTP_201_CREATED, body={"id": body.resource_id}
+        )
+    await container.audit.record(
+        principal=principal,
+        action="idempotency.reconcile",
+        outcome=Outcome.ALLOWED,
+        request_id=request_id,
+        resource_model="res.partner" if body.resource_id else None,
+        resource_id=body.resource_id,
+        details={
+            "key": body.key,
+            "actor_subject": body.actor_subject,
+            "resolution": body.resolution,
+        },
+    )
+    return ReconcileOut(actor_subject=body.actor_subject, key=body.key, resolution=body.resolution)

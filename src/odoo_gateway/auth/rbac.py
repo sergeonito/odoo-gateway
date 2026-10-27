@@ -23,6 +23,7 @@ class Permission(StrEnum):
     REPORTS_READ = "reports:read"
     PARTNERS_WRITE = "partners:write"
     AUDIT_READ = "audit:read"
+    IDEMPOTENCY_RECONCILE = "idempotency:reconcile"
 
 
 ROLE_PERMISSIONS: Final[Mapping[Role, frozenset[Permission]]] = {

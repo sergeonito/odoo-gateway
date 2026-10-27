@@ -39,7 +39,10 @@ mid-flight the key stays claimed, so the retry gets 409 instead of a duplicate, 
 - No duplicate records from retries, no unaudited writes: the two failure modes of the
   two-system write are both visible and both bounded.
 - Clients that want safe retries must send a key; without one the write behaves as before.
-- Claims abandoned by a crash need a human (or a reconciliation job, not written yet) to
-  compare the `attempted` event with Odoo and release or complete the row by hand.
+- Claims abandoned by a crash still need a human decision, because only Odoo knows whether the
+  record was created. `GET /reconciliation/idempotency` (admins) lists claims in progress for
+  longer than a threshold with the request id of their `attempted` event; after checking Odoo
+  the operator posts `release` (no record, the client may retry) or `complete` with the record
+  id (the retry will be replayed). Both are audited as `idempotency.reconcile`.
 - The row stores the response body (a record id) and a SHA-256 of the request, never the
   submitted values.
