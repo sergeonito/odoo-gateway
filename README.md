@@ -27,7 +27,7 @@ access rules, and leave no common trail. The gateway puts three things in one pl
 | Odoo client | Async JSON-RPC (`/jsonrpc`), uid cached, typed errors, Odoo tracebacks never leave the client, backoff with jitter for reads only |
 | Auth | Entra ID access tokens (RS256, tenant signing keys, `oid` as subject, app roles mapped by config); HS256 dev tokens, refused when `environment=production` |
 | RBAC | Roles `viewer` / `operator` / `admin` → permissions; routes depend on permissions only; every 403 is audited |
-| Audit | PostgreSQL table, append-only through triggers (UPDATE, DELETE, TRUNCATE rejected); field names, not values |
+| Audit | PostgreSQL table, append-only through triggers (UPDATE, DELETE, TRUNCATE rejected); an `attempted` event before each Odoo write and the outcome after it; field names, not values |
 | API | `GET /products` (search by name or internal reference), `GET /products/{id}/stock`, `POST /partners`, `GET /audit`, `GET /health`; OpenAPI at `/docs` |
 | Reports | `GET /reports/stock` serves the last stock snapshot from the gateway's database, not Odoo (ADR-0005); a Celery beat + worker pair takes it every `GATEWAY_SNAPSHOT_INTERVAL_S` (Redis broker), `make snapshot` takes one by hand |
 | Local Odoo | Compose stack with Odoo 18 (`stock`, `contacts`); `make odoo-setup` creates the integration user with two standard groups and seeds three products with stock; `make odoo-apikey` issues its API key |
@@ -41,7 +41,7 @@ access rules, and leave no common trail. The gateway puts three things in one pl
 ## Roadmap
 
 1. Microsoft Entra ID with a real tenant: app roles, device-code token, setup guide.
-2. Idempotent writes: `Idempotency-Key`, an `attempted` audit event before the Odoo call.
+2. Idempotent writes: `Idempotency-Key`, retries answered from the stored result.
 3. Microsoft Graph: group membership sync, disabled users lose access.
 
 ## Run it

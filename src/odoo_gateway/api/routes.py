@@ -89,6 +89,15 @@ async def create_partner(
 ) -> CreatedOut:
     values = body.to_odoo()
     audit_fields = {"fields": sorted(values)}  # names only, never the values
+    # Written before the call: a crash after Odoo commits still leaves a trace (ADR-0004).
+    await container.audit.record(
+        principal=principal,
+        action="partners.create",
+        outcome=Outcome.ATTEMPTED,
+        request_id=request_id,
+        resource_model="res.partner",
+        details=audit_fields,
+    )
     try:
         partner_id = await container.odoo.create("res.partner", values)
     except OdooError as exc:

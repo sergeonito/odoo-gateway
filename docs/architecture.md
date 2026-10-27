@@ -22,9 +22,10 @@ sequenceDiagram
         G->>A: event authz.partners:write = denied
         G-->>P: 403
     else allowed
+        G->>A: event partners.create = attempted (field names, no values)
         G->>O: object.execute_kw res.partner create
         O-->>G: new id (or an Odoo exception)
-        G->>A: event partners.create = allowed or failed<br/>(field names and error class, no values)
+        G->>A: event partners.create = allowed or failed<br/>(record id or error class)
         G-->>P: 201 with the new id, or 422 / 502 / 503
     end
 ```
@@ -106,20 +107,21 @@ Dependency rules, enforced by imports and by tests:
 
 ## What the audit log holds
 
-One row per write and per refusal in `audit_events`:
+Two rows per write (`attempted` before the Odoo call, the outcome after it) and one per refusal
+in `audit_events`:
 
 | Column | Example | Why |
 | --- | --- | --- |
 | `actor_subject`, `actor_name`, `actor_roles` | `oid`, "Olena K.", `["operator"]` | Who, as the identity provider knows them |
-| `action`, `outcome` | `partners.create`, `allowed` / `denied` / `failed` | What was attempted and how it ended |
+| `action`, `outcome` | `partners.create`, `attempted` / `allowed` / `denied` / `failed` | What was attempted and how it ended |
 | `resource_model`, `resource_id` | `res.partner`, 44 | Which Odoo record |
 | `request_id` | from `X-Request-ID` or generated | Correlates with application logs |
 | `details` | `{"fields": ["email", "name"]}` or `{"error": "OdooValidationError"}` | Field names and error classes only, never submitted values |
 
 The table is append-only at the database level: triggers reject `UPDATE`, `DELETE` and
-`TRUNCATE` (migration 0001, tested against PostgreSQL in CI). The known gap, a crash between
-the Odoo commit and the audit commit, is described in
-[ADR-0004](adr/0004-audit-after-the-call.md) together with the planned idempotency-key fix.
+`TRUNCATE` (migration 0001, tested against PostgreSQL in CI). A crash between the Odoo commit
+and the outcome event leaves an `attempted` row with no `allowed` or `failed` after it, which is
+what a reconciliation looks for ([ADR-0004](adr/0004-audit-after-the-call.md)).
 
 ## Failure behaviour
 

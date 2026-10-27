@@ -5,9 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+import pytest
 
 from odoo_gateway.audit.log import AuditLog
 from odoo_gateway.auth.rbac import Role
+from odoo_gateway.container import Container
+from odoo_gateway.main import create_app
 from odoo_gateway.odoo.errors import OdooAccessDeniedError, OdooValidationError
 from odoo_gateway.reports.snapshot import StockReports
 from tests.conftest import FakeOdoo
@@ -85,12 +88,13 @@ async def test_operator_creates_partner_and_audit_holds_no_values(
     )
     assert response.status_code == 201
     assert response.headers["X-Request-ID"] == "req-12345678"
-    [event] = await audit.recent(limit=10)
+    [event, attempted] = await audit.recent(limit=10)  # newest first
+    assert (attempted.outcome, attempted.resource_id) == ("attempted", None)
     assert event.outcome == "allowed"
     assert event.resource_model == "res.partner"
     assert event.resource_id == response.json()["id"]
-    assert event.request_id == "req-12345678"
-    assert event.details == {"fields": ["email", "is_company", "name"]}
+    assert event.request_id == attempted.request_id == "req-12345678"
+    assert event.details == attempted.details == {"fields": ["email", "is_company", "name"]}
     assert "ops@acme.example" not in str(event.details)
 
 
@@ -110,8 +114,37 @@ async def test_odoo_validation_error_is_422_and_audited_as_failed(
     response = await client.post("/partners", json={"name": "Acme"}, headers=auth(Role.OPERATOR))
     assert response.status_code == 422
     assert response.json() == {"detail": "Email already used"}
-    [event] = await audit.recent(limit=10)
+    [event, attempted] = await audit.recent(limit=10)
+    assert attempted.outcome == "attempted"
     assert (event.outcome, event.details["error"]) == ("failed", "OdooValidationError")
+
+
+async def test_crash_after_the_odoo_call_still_leaves_an_attempted_event(
+    odoo: FakeOdoo, audit: AuditLog, verifier: Any, reports: Any, auth: Any
+) -> None:
+    """The gap ADR-0004 describes: Odoo commits, then the gateway dies before the outcome event."""
+
+    class CrashingOdoo(FakeOdoo):
+        async def create(self, model: str, values: dict[str, Any]) -> int:
+            await super().create(model, values)
+            raise RuntimeError("process killed")
+
+    crashing = CrashingOdoo()
+    app = create_app(
+        container=Container(odoo=crashing, audit=audit, verifier=verifier, reports=reports)
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://gateway") as client:
+        with pytest.raises(RuntimeError):
+            await client.post("/partners", json={"name": "Acme"}, headers=auth(Role.OPERATOR))
+
+    assert len(crashing.calls) == 1  # Odoo did create the record
+    [event] = await audit.recent(limit=10)
+    assert (event.action, event.outcome, event.details) == (
+        "partners.create",
+        "attempted",
+        {"fields": ["is_company", "name"]},  # is_company has a default
+    )
 
 
 async def test_integration_user_misconfiguration_is_hidden_from_caller(

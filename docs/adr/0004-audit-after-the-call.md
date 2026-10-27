@@ -1,6 +1,6 @@
 # ADR-0004: The audit event is written after the Odoo call
 
-**Status:** accepted for v0.1, with a known gap · 2026-10-22
+**Status:** accepted · 2026-10-22, `attempted` event added 2026-10-27
 
 ## Context
 
@@ -15,14 +15,14 @@ audited before anything reaches Odoo. The table is append-only at the database l
 reject UPDATE, DELETE and TRUNCATE. Events hold field names and error classes, never the
 submitted values, so the log does not become a second copy of personal data.
 
-## Known gap
+## The gap, and the first half of the fix
 
-If the gateway dies after Odoo commits but before the audit commit, the record exists with no
-audit event. If the audit commit fails, the caller gets a 500 although the record was created,
-and a retry would create a duplicate.
+If the gateway dies after Odoo commits but before the audit commit, the record would exist with
+no audit event at all. Since 2026-10-27 every write is audited twice: an `attempted` event with
+the field names is committed before the Odoo call, and the outcome event (`allowed` with the
+record id, or `failed` with the error class) after it. A crash in between now leaves an
+`attempted` row with no outcome, which is a reconciliation query, not a silent loss.
 
-## Way out (planned)
-
-Write an `attempted` event with an idempotency key before calling Odoo, then a second event
-with the outcome. A reconciliation job flags `attempted` events with no outcome. The same key,
-sent by clients as `Idempotency-Key`, lets the gateway answer retries without a second create.
+A client retry after such a crash would still create a second record. That is the remaining
+gap: closed by `Idempotency-Key` (next), which lets the gateway recognise the retry and answer
+it from the stored result instead of calling Odoo again.

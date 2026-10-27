@@ -14,6 +14,7 @@ from odoo_gateway.db import Base
 
 
 class Outcome(StrEnum):
+    ATTEMPTED = "attempted"  # authorised, about to call Odoo (written before the call, ADR-0004)
     ALLOWED = "allowed"  # authorised and done
     DENIED = "denied"  # authorisation refused
     FAILED = "failed"  # authorised, but the call failed
@@ -26,7 +27,8 @@ class AuditEvent(Base):
     __tablename__ = "audit_events"
     __table_args__ = (
         CheckConstraint(
-            "outcome IN ('allowed', 'denied', 'failed')", name="audit_events_outcome_valid"
+            "outcome IN ('attempted', 'allowed', 'denied', 'failed')",
+            name="audit_events_outcome_valid",
         ),
     )
 
